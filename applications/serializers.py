@@ -50,15 +50,17 @@ class InternshipSerializer(serializers.ModelSerializer):
 class ApplicationSerializer(serializers.ModelSerializer):
     """
     LOGIC: The Recruitment Dashboard Mapping.
-    MASTER FIX: Includes offer_id and company_name so the frontend "Already Applied" 
-    detection and sorting work perfectly.
+    MASTER FIX: Includes offer_id, offer_title, and company_name.
+    SYNC: Naming updated to refusalReason to match the PostgreSQL model.
     """
     internship = InternshipSerializer(read_only=True)
+    
+    # RELATIONAL LOOKUPS: Providing flat keys for Frontend logic
     offer_id = serializers.ReadOnlyField(source='offer.id')
     offer_title = serializers.ReadOnlyField(source='offer.title')
     company_name = serializers.ReadOnlyField(source='offer.company.companyName')
     
-
+    # FORMATTING: Standardizing the date for the UI list
     applied_date = serializers.DateField(source='applicationDate', read_only=True)
 
     class Meta:
@@ -71,11 +73,17 @@ class ApplicationSerializer(serializers.ModelSerializer):
             'applied_date', 
             'applicationStatus', 
             'matchingScore', 
-            'refusal_reason', 
+            'refusalReason', # FIXED: Matches model class field
             'internship'
         ]
     
-        read_only_fields = ['applicationDate', 'applicationStatus', 'matchingScore', 'refusal_reason']
+        # DATA INTEGRITY: These fields are governed by server logic, not user input
+        read_only_fields = [
+            'applicationDate', 
+            'applicationStatus', 
+            'matchingScore', 
+            'refusalReason'
+        ]
 
 class NotificationSerializer(serializers.ModelSerializer):
     """LOGIC: User Alert Mapping."""

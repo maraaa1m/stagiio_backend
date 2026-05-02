@@ -20,6 +20,9 @@ class Application(models.Model):
     applicationDate = models.DateField(auto_now_add=True)
     applicationStatus = models.CharField(max_length=10, choices=STATUS_CHOICES, default=PENDING)
     matchingScore = models.FloatField(default=0.0)
+    
+    # NEW: Persists feedback from the recruiter for the student's dashboard
+    refusalReason = models.TextField(blank=True, null=True)
 
     def __str__(self):
         return f"{self.student} -> {self.offer}"
