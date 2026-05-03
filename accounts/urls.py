@@ -23,7 +23,7 @@ urlpatterns = [
     path('student/update/',        views.update_student_profile),
     path('student/profile/photo/', views.upload_student_photo),
     path('student/cv/upload/',     views.upload_cv),
-    path('student/upload-cv/',     views.upload_cv), # Alias for frontend consistency
+    path('student/upload-cv/',     views.upload_cv),  # Alias for frontend consistency
     path('company/profile/',       views.get_company_profile),
     path('company/update/',        views.update_company_profile),
     path('company/logo/upload/',   views.upload_company_logo),
@@ -32,6 +32,8 @@ urlpatterns = [
     path('admin/statistics/',                           admin_views.get_statistics),
     path('admin/agreements/',                           admin_views.get_all_agreements),
     path('admin/students/',                             admin_views.get_all_students),
+    # FIX 1: Added missing student detail endpoint — was causing 404 in AdminStudentDetail.tsx
+    path('admin/students/<int:student_id>/',            admin_views.get_student_detail),
     path('admin/companies/',                            admin_views.get_all_companies),
     path('admin/companies/pending/',                    admin_views.get_pending_companies),
     path('admin/companies/blacklisted/',                admin_views.get_blacklisted_companies),

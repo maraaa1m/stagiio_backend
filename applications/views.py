@@ -47,7 +47,7 @@ def get_student_applications(request):
 
             data.append({
                 'id': a.id,
-                'offer_id': a.offer.id, 
+                'offer_id': a.offer.id,
                 'offerTitle': a.offer.title,
                 'company': a.offer.company.companyName,
                 'status': a.applicationStatus,
@@ -65,7 +65,6 @@ def get_student_applications(request):
 
 @api_view(['GET'])
 def get_application(request, application_id):
-    """FIXED: Restored the single application detail view."""
     try:
         student = Student.objects.get(user=request.user)
         app = get_object_or_404(Application, id=application_id, student=student)
@@ -152,7 +151,8 @@ def company_mark_internship_ended(request, internship_id):
 def get_all_applications_for_admin(request):
     admin = Admin.objects.get(user=request.user)
     qs = Application.objects.select_related('student', 'offer', 'offer__company')
-    if not admin.is_dean:
+    # FIX: was admin.is_dean — now correctly uses admin.is_superadmin
+    if not admin.is_superadmin:
         qs = qs.filter(student__department=admin.department)
     data = [{'id': a.id, 'status': a.applicationStatus, 'student': a.student.firstName, 'offer': a.offer.title} for a in qs]
     return Response(data)
@@ -162,7 +162,8 @@ def get_all_applications_for_admin(request):
 def get_accepted_for_admin(request):
     admin = Admin.objects.get(user=request.user)
     qs = Application.objects.filter(applicationStatus='ACCEPTED')
-    if not admin.is_dean:
+    # FIX: was admin.is_dean — now correctly uses admin.is_superadmin
+    if not admin.is_superadmin:
         qs = qs.filter(student__department=admin.department)
     data = [{'id': a.id, 'student': f"{a.student.firstName} {a.student.lastName}", 'company': a.offer.company.companyName} for a in qs]
     return Response(data)
@@ -172,7 +173,8 @@ def get_accepted_for_admin(request):
 def get_pending_certifications(request):
     admin = Admin.objects.get(user=request.user)
     qs = Internship.objects.filter(status=Internship.PENDING_CERT)
-    if not admin.is_dean:
+    # FIX: was admin.is_dean — now correctly uses admin.is_superadmin
+    if not admin.is_superadmin:
         qs = qs.filter(application__student__department=admin.department)
     data = [{'id': i.id, 'student': i.application.student.firstName, 'company': i.application.offer.company.companyName} for i in qs]
     return Response(data)
@@ -184,13 +186,27 @@ def admin_validate_internship(request, application_id):
     app = get_object_or_404(Application, id=application_id, applicationStatus='ACCEPTED')
     internship, _ = Internship.objects.get_or_create(
         application=app,
-        defaults={'startDate': app.offer.internshipStartDate, 'endDate': app.offer.internshipEndDate, 'topic': app.offer.title, 'supervisorName': f"Admin {admin.lastName}"}
+        defaults={
+            'startDate': app.offer.internshipStartDate,
+            'endDate': app.offer.internshipEndDate,
+            'topic': app.offer.title,
+            'supervisorName': f"Admin {admin.lastName}"
+        }
     )
     pdf_file = generate_agreement_pdf(app, admin)
-    Agreement.objects.update_or_create(internship=internship, defaults={'admin': admin, 'pdfUrl': pdf_file})
+
+    # FIX 3: Save to model first, then read .url from the saved FileField instance.
+    # Calling pdf_file.url on a raw ContentFile crashes — only a saved FileField has .url.
+    agreement, _ = Agreement.objects.update_or_create(
+        internship=internship,
+        defaults={'admin': admin, 'pdfUrl': pdf_file}
+    )
     app.applicationStatus = 'VALIDATED'
     app.save()
-    return Response({'message': 'Validated', 'pdfUrl': request.build_absolute_uri(pdf_file.url)}, status=201)
+
+    # Read URL from the saved agreement instance, not the raw ContentFile
+    pdf_url = request.build_absolute_uri(agreement.pdfUrl.url) if agreement.pdfUrl else None
+    return Response({'message': 'Validated', 'pdfUrl': pdf_url}, status=201)
 
 
 @api_view(['POST'])
@@ -198,10 +214,16 @@ def admin_issue_certificate(request, internship_id):
     admin = Admin.objects.get(user=request.user)
     internship = get_object_or_404(Internship, id=internship_id, status=Internship.PENDING_CERT)
     pdf_file = generate_certificate_pdf(internship, admin)
-    Certificate.objects.create(internship=internship, admin=admin, pdfUrl=pdf_file)
+
+    # FIX 3: Same fix as admin_validate_internship.
+    # Save first, then read .url from the saved Certificate instance.
+    cert = Certificate.objects.create(internship=internship, admin=admin, pdfUrl=pdf_file)
     internship.status = Internship.COMPLETED
     internship.save()
-    return Response({'message': 'Certificate Issued'}, status=201)
+
+    # Read URL from the saved cert instance, not the raw ContentFile
+    pdf_url = request.build_absolute_uri(cert.pdfUrl.url) if cert.pdfUrl else None
+    return Response({'message': 'Certificate Issued', 'pdfUrl': pdf_url}, status=201)
 
 
 # ── NOTIFICATIONS ──

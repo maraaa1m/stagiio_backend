@@ -50,12 +50,12 @@ class Student(models.Model):
     cvFile = models.FileField(upload_to='cvs/', blank=True, null=True)
     profile_photo = models.ImageField(upload_to='photos/', blank=True, null=True)
     univWillaya = models.CharField(max_length=100)
-    
+
     # RELATIONAL LINKS
     university = models.ForeignKey(University, on_delete=models.PROTECT, related_name='students', null=True)
     faculty = models.ForeignKey(Faculty, on_delete=models.PROTECT, related_name='students', null=True)
     department = models.ForeignKey(Department, on_delete=models.PROTECT, related_name='students', null=True)
-    
+
     skills = models.ManyToManyField('offers.Skill', blank=True, related_name='students')
 
     def __str__(self):
@@ -83,7 +83,7 @@ class Admin(models.Model):
     user = models.OneToOneField(User, on_delete=models.CASCADE, related_name='admin_profile')
     firstName = models.CharField(max_length=100)
     lastName = models.CharField(max_length=100)
-    
+
     # ADMINISTRATIVE JURISDICTION
     university = models.ForeignKey(University, on_delete=models.CASCADE, null=True, blank=True)
     faculty = models.ForeignKey(Faculty, on_delete=models.CASCADE, null=True, blank=True)
@@ -93,8 +93,17 @@ class Admin(models.Model):
     def is_superadmin(self):
         """
         Logic: Per teacher's suggestion.
-        If an admin is not restricted to a specific department, they possess 
+        If an admin is not restricted to a specific department, they possess
         Superadmin privileges for global institutional oversight.
+        """
+        return self.department is None
+
+    @property
+    def is_dean(self):
+        """
+        FIX 2: Alias for is_superadmin.
+        applications/views.py references admin.is_dean throughout.
+        Both properties return True when department is None (superadmin/dean level).
         """
         return self.department is None
 
