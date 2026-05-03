@@ -19,17 +19,25 @@ class CustomTokenObtainPairSerializer(TokenObtainPairSerializer):
         token['role'] = user.role
         token['email'] = user.email
         
-        # Check if the user has an admin profile to inject their silo permissions
         if hasattr(user, 'admin_profile'):
-            admin = user.admin_profile
-            # Logic: department_id is None -> Superadmin (Global Access)
-            token['department_id'] = admin.department.id if admin.department else None
-            token['faculty_id'] = admin.faculty.id if admin.faculty else None
-            token['university_id'] = admin.university.id if admin.university else None
+            try:
+                admin = user.admin_profile
+                if admin.department:
+                    token['department_id'] = admin.department.id
+                    token['department'] = admin.department.name
+                else:
+                    token['department_id'] = None
+                    token['department'] = None
+                token['faculty_id'] = admin.faculty.id if admin.faculty else None
+                token['university_id'] = admin.university.id if admin.university else None
+            except Exception:
+                token['department_id'] = None
+                token['department'] = None
+                token['faculty_id'] = None
+                token['university_id'] = None
         return token
 
 # --- INSTITUTIONAL DISCOVERY SERIALIZERS ---
-# These are used by the "Chained Select" logic in the registration form.
 class UniversitySerializer(serializers.ModelSerializer):
     class Meta:
         model = University
@@ -48,11 +56,6 @@ class DepartmentSerializer(serializers.ModelSerializer):
 # --- ACTOR REGISTRATION ENGINES ---
 
 class StudentRegisterSerializer(serializers.ModelSerializer):
-    """
-    LOGIC: Institutional Onboarding.
-    Handles the creation of the Auth account and the specialized Student profile.
-    It captures the student's specific location in the academic hierarchy.
-    """
     password = serializers.CharField(write_only=True, required=True, validators=[validate_password])
     
     class Meta:
@@ -60,16 +63,13 @@ class StudentRegisterSerializer(serializers.ModelSerializer):
         fields = ['email', 'password']
 
     def validate_email(self, value):
-        # Business Rule: Institutional domain verification.
         if not value.endswith('.dz'):
             raise serializers.ValidationError("Please use your professional .dz university email.")
         return value
 
     def create(self, validated_data):
-        # Data Extraction from the request context
         req_data = self.context['request'].data
         
-        # 1. Create the Authentication Account
         user = User.objects.create_user(
             username=validated_data['email'],
             email=validated_data['email'],
@@ -77,8 +77,6 @@ class StudentRegisterSerializer(serializers.ModelSerializer):
             role=User.STUDENT,
         )
         
-        # 2. Create the Academic Profile
-        # We link the student directly to their University, Faculty, and Department IDs.
         Student.objects.create(
             user=user,
             firstName=req_data.get('firstName', ''),
@@ -92,11 +90,6 @@ class StudentRegisterSerializer(serializers.ModelSerializer):
         return user
 
 class CompanyRegisterSerializer(serializers.ModelSerializer):
-    """
-    LOGIC: Corporate Legal Onboarding.
-    Captures the 'Registre de Commerce' as a physical file for the 
-    Superadmin's future audit.
-    """
     password = serializers.CharField(write_only=True, required=True, validators=[validate_password])
     
     class Meta:
@@ -121,7 +114,6 @@ class CompanyRegisterSerializer(serializers.ModelSerializer):
             location=req_data.get('location', ''),
             website=req_data.get('website', ''),
             phoneNumber=req_data.get('phoneNumber', ''),
-            # Binary stream logic for license verification
             registreCommerce=files.get('registreCommerce'),
         )
         return user
@@ -129,10 +121,6 @@ class CompanyRegisterSerializer(serializers.ModelSerializer):
 # --- DATA MODIFICATION LAYER ---
 
 class StudentUpdateSerializer(serializers.ModelSerializer):
-    """
-    LOGIC: Digital CV Orchestration.
-    Ensures technical skills are mapped to their unique IDs for the matching engine.
-    """
     skills = serializers.PrimaryKeyRelatedField(many=True, queryset=Skill.objects.all(), required=False)
     
     class Meta:
@@ -143,7 +131,7 @@ class StudentUpdateSerializer(serializers.ModelSerializer):
             'githubLink', 
             'portfolioLink', 
             'IDCardNumber', 
-            'socialSecurityNumber', # Legal identifier for PDF documents
+            'socialSecurityNumber',
             'university', 
             'faculty', 
             'department', 
@@ -151,7 +139,6 @@ class StudentUpdateSerializer(serializers.ModelSerializer):
         ]
 
     def update(self, instance, validated_data):
-        # Relational Sync for Many-to-Many skills
         skill_ids = validated_data.pop('skills', None)
         for attr, value in validated_data.items():
             setattr(instance, attr, value)

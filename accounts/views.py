@@ -243,3 +243,32 @@ def reset_password(request):
         return Response({'error': 'Invalid token'}, status=400)
     except:
         return Response(status=400)
+
+@api_view(['GET'])
+def get_accepted_for_admin(request):
+    admin = Admin.objects.get(user=request.user)
+    qs = Application.objects.filter(
+        applicationStatus='ACCEPTED'
+    ).select_related(
+        'student', 
+        'student__department', 
+        'student__user',
+        'offer', 
+        'offer__company'
+    )
+    if not admin.is_superadmin:
+        qs = qs.filter(student__department=admin.department)
+    
+    data = []
+    for a in qs:
+        data.append({
+            'id': a.id,
+            'student': f"{a.student.firstName} {a.student.lastName}",
+            'studentId': a.student.id,
+            'studentEmail': a.student.user.email,
+            'studentDepartment': a.student.department.name if a.student.department else '',
+            'company': a.offer.company.companyName,
+            'offer': a.offer.title,
+            'score': a.matchingScore,
+        })
+    return Response(data)
