@@ -4,40 +4,25 @@ from .models import User, Student, Company, University, Faculty, Department
 from offers.models import Skill 
 from rest_framework_simplejwt.serializers import TokenObtainPairSerializer
 
-# --- JWT: ROLE & JURISDICTION INJECTION ---
 class CustomTokenObtainPairSerializer(TokenObtainPairSerializer):
-    """
-    LOGIC: Security Token Orchestration.
-    We override the default JWT payload to include the user's role and their 
-    institutional scope. This allows the React frontend to perform 'Route Guarding'
-    and display the correct dashboard (Superadmin vs Departmental Admin) 
-    immediately after the handshake.
-    """
     @classmethod
     def get_token(cls, user):
         token = super().get_token(user)
         token['role'] = user.role
         token['email'] = user.email
         
-        if hasattr(user, 'admin_profile'):
-            try:
-                admin = user.admin_profile
-                if admin.department:
-                    token['department_id'] = admin.department.id
-                    token['department'] = admin.department.name
-                else:
-                    token['department_id'] = None
-                    token['department'] = None
-                token['faculty_id'] = admin.faculty.id if admin.faculty else None
-                token['university_id'] = admin.university.id if admin.university else None
-            except Exception:
-                token['department_id'] = None
-                token['department'] = None
-                token['faculty_id'] = None
-                token['university_id'] = None
+        # SPRINT FIX: Inject names into token for Dashboard headers
+        if hasattr(user, 'student_profile'):
+            token['first_name'] = user.student_profile.firstName
+            token['last_name'] = user.student_profile.lastName
+        elif hasattr(user, 'admin_profile'):
+            admin = user.admin_profile
+            token['first_name'] = admin.firstName
+            token['department_id'] = admin.department.id if admin.department else None
+            token['department_name'] = admin.department.name if admin.department else None
+            
         return token
 
-# --- INSTITUTIONAL DISCOVERY SERIALIZERS ---
 class UniversitySerializer(serializers.ModelSerializer):
     class Meta:
         model = University
@@ -53,8 +38,6 @@ class DepartmentSerializer(serializers.ModelSerializer):
         model = Department
         fields = '__all__'
 
-# --- ACTOR REGISTRATION ENGINES ---
-
 class StudentRegisterSerializer(serializers.ModelSerializer):
     password = serializers.CharField(write_only=True, required=True, validators=[validate_password])
     
@@ -64,12 +47,11 @@ class StudentRegisterSerializer(serializers.ModelSerializer):
 
     def validate_email(self, value):
         if not value.endswith('.dz'):
-            raise serializers.ValidationError("Please use your professional .dz university email.")
+            raise serializers.ValidationError("Academic (.dz) email required.")
         return value
 
     def create(self, validated_data):
         req_data = self.context['request'].data
-        
         user = User.objects.create_user(
             username=validated_data['email'],
             email=validated_data['email'],
@@ -77,12 +59,15 @@ class StudentRegisterSerializer(serializers.ModelSerializer):
             role=User.STUDENT,
         )
         
+        # BATTLE SPRINT FIX: Capture IDCard and SSN during initial creation
         Student.objects.create(
             user=user,
             firstName=req_data.get('firstName', ''),
             lastName=req_data.get('lastName', ''),
             phoneNumber=req_data.get('phoneNumber', ''),
             univWillaya=req_data.get('univWillaya', ''),
+            IDCardNumber=req_data.get('IDCardNumber') or req_data.get('idCardNumber'),
+            socialSecurityNumber=req_data.get('socialSecurityNumber') or req_data.get('ssn'),
             university_id=req_data.get('university'), 
             faculty_id=req_data.get('faculty'),       
             department_id=req_data.get('department'), 
@@ -117,8 +102,6 @@ class CompanyRegisterSerializer(serializers.ModelSerializer):
             registreCommerce=files.get('registreCommerce'),
         )
         return user
-
-# --- DATA MODIFICATION LAYER ---
 
 class StudentUpdateSerializer(serializers.ModelSerializer):
     skills = serializers.PrimaryKeyRelatedField(many=True, queryset=Skill.objects.all(), required=False)

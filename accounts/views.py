@@ -22,58 +22,53 @@ from django.utils.http import urlsafe_base64_encode, urlsafe_base64_decode
 from django.utils.encoding import force_bytes, force_str
 from django.core.mail import send_mail
 
-# ── CUSTOM LOGIN ──
 class CustomTokenObtainPairView(TokenObtainPairView):
-    """Logic: Overrides JWT login to inject 'role' and 'department' into the token."""
     serializer_class = CustomTokenObtainPairSerializer
 
-# ── HELPER: TOKEN ISSUANCE ──
 def get_tokens_for_user(user):
-    """Logic: Generates session keys. Role is added for immediate frontend routing."""
     refresh = RefreshToken.for_user(user)
     refresh['role'] = user.role
     return {'refresh': str(refresh), 'access': str(refresh.access_token)}
 
-# ── HELPER: CANONICAL PROFILE BUILDER ──
 def _build_student_profile(student, request):
-    """
-    LOGIC: Institutional Identity Assembly.
-    Traverses the relational hierarchy to build a high-fidelity JSON profile.
-    Ensures media links are absolute URIs for the React frontend.
-    """
     def get_abs_url(field):
         if not field: return None
         return request.build_absolute_uri(field.url)
 
-    return {
-        'email':         student.user.email,
-        'firstName':     student.firstName,
-        'lastName':      student.lastName,
-        'phoneNumber':   student.phoneNumber,
-        'univWillaya':   student.univWillaya,
-        'githubLink':    student.githubLink or '',
-        'portfolioLink': student.portfolioLink or '',
-        'photo':         get_abs_url(student.profile_photo),
-        'cv':            get_abs_url(student.cvFile),
-        
-        # HIERARCHY DATA: Accessing names through Foreign Key relations
-        'university':    student.university.name if student.university else "Not Set",
-        'faculty':       student.faculty.name if student.faculty else "Not Set",
-        'department':    student.department.name if student.department else "Not Set",
-        'department_id': student.department.id if student.department else None,
-        
-        'socialSecurityNumber': student.socialSecurityNumber or 'Not Provided',
-        'IDCardNumber':         student.IDCardNumber or 'Not Provided',
-        'skills':        [{'id': s.id, 'skillName': s.skillName} for s in student.skills.all()],
-    }
+    dept_data = None
+    if student.department:
+        dept_data = {
+            'id': student.department.id,
+            'name': student.department.name,
+            'faculty': {
+                'id': student.department.faculty.id,
+                'name': student.department.faculty.name,
+                'university': {
+                    'id': student.department.faculty.university.id,
+                    'name': student.department.faculty.university.name
+                }
+            }
+        }
 
-# ── INSTITUTIONAL DISCOVERY (PUBLIC) ──
-# Logic: These APIs enable 'Chained Selects' in the registration form.
+    return {
+        'email': student.user.email,
+        'firstName': student.firstName,
+        'lastName': student.lastName,
+        'phoneNumber': student.phoneNumber,
+        'univWillaya': student.univWillaya,
+        'githubLink': student.githubLink or '',
+        'portfolioLink': student.portfolioLink or '',
+        'photo': get_abs_url(student.profile_photo),
+        'cv': get_abs_url(student.cvFile),
+        'IDCardNumber': student.IDCardNumber,
+        'socialSecurityNumber': student.socialSecurityNumber,
+        'department': dept_data, 
+        'skills': [{'id': s.id, 'skillName': s.skillName} for s in student.skills.all()],
+    }
 
 @api_view(['GET'])
 @permission_classes([AllowAny])
 def get_universities(request):
-    """Returns the list of all participating Algerian Universities."""
     univs = University.objects.all().order_by('name')
     serializer = UniversitySerializer(univs, many=True)
     return Response(serializer.data)
@@ -81,7 +76,6 @@ def get_universities(request):
 @api_view(['GET'])
 @permission_classes([AllowAny])
 def get_faculties(request, university_id):
-    """Returns faculties belonging strictly to the selected University."""
     facs = Faculty.objects.filter(university_id=university_id).order_by('name')
     serializer = FacultySerializer(facs, many=True)
     return Response(serializer.data)
@@ -89,17 +83,13 @@ def get_faculties(request, university_id):
 @api_view(['GET'])
 @permission_classes([AllowAny])
 def get_departments(request, faculty_id):
-    """Returns departments belonging strictly to the selected Faculty."""
     depts = Department.objects.filter(faculty_id=faculty_id).order_by('name')
     serializer = DepartmentSerializer(depts, many=True)
     return Response(serializer.data)
 
-# ── ONBOARDING ──
-
 @api_view(['POST'])
 @permission_classes([AllowAny])
 def register_student(request):
-    """Logic: Orchestrates Student creation and assigns them to a Department silo."""
     serializer = StudentRegisterSerializer(data=request.data, context={'request': request})
     if serializer.is_valid():
         user = serializer.save()
@@ -110,14 +100,11 @@ def register_student(request):
 @permission_classes([AllowAny])
 @parser_classes([MultiPartParser, FormParser])
 def register_company(request):
-    """Logic: Captures corporate license (PDF) during the registration stream."""
     serializer = CompanyRegisterSerializer(data=request.data, context={'request': request})
     if serializer.is_valid():
         user = serializer.save()
         return Response({'message': 'Success', **get_tokens_for_user(user)}, status=201)
     return Response(serializer.errors, status=400)
-
-# ── PROFILE OPERATIONS ──
 
 @api_view(['GET'])
 def get_student_profile(request):
@@ -182,7 +169,7 @@ def get_company_profile(request):
 @api_view(['PUT'])
 def update_company_profile(request):
     try:
-        company = Company.objects.get(user=request.user)
+        company    = Company.objects.get(user=request.user)
         serializer = CompanyUpdateSerializer(company, data=request.data, partial=True)
         if serializer.is_valid():
             serializer.save()
@@ -202,12 +189,9 @@ def upload_company_logo(request):
     except:
         return Response(status=400)
 
-# ── SECURITY UTILITIES ──
-
 @api_view(['POST'])
 def logout(request):
     try:
-        # Stateless termination: Adding the token to the server-side blacklist.
         token = RefreshToken(request.data.get('refresh'))
         token.blacklist()
         return Response(status=200)
@@ -219,9 +203,9 @@ def logout(request):
 def forgot_password(request):
     email = request.data.get('email', '').strip()
     try:
-        user = User.objects.get(email=email)
+        user  = User.objects.get(email=email)
         token = default_token_generator.make_token(user)
-        uid = urlsafe_base64_encode(force_bytes(user.pk))
+        uid   = urlsafe_base64_encode(force_bytes(user.pk))
         reset_url = f"http://localhost:5173/reset-password/{uid}/{token}/"
         send_mail('Password Reset', f'Click here: {reset_url}', 'noreply@stag.io', [email])
     except:
@@ -231,7 +215,6 @@ def forgot_password(request):
 @api_view(['POST'])
 @permission_classes([AllowAny])
 def reset_password(request):
-    """Logic: Verifies UID/Token and synchronizes new password to DB."""
     uidb64, token, new_password = request.data.get('uid'), request.data.get('token'), request.data.get('new_password')
     try:
         uid  = force_str(urlsafe_base64_decode(uidb64))
@@ -243,32 +226,3 @@ def reset_password(request):
         return Response({'error': 'Invalid token'}, status=400)
     except:
         return Response(status=400)
-
-@api_view(['GET'])
-def get_accepted_for_admin(request):
-    admin = Admin.objects.get(user=request.user)
-    qs = Application.objects.filter(
-        applicationStatus='ACCEPTED'
-    ).select_related(
-        'student', 
-        'student__department', 
-        'student__user',
-        'offer', 
-        'offer__company'
-    )
-    if not admin.is_superadmin:
-        qs = qs.filter(student__department=admin.department)
-    
-    data = []
-    for a in qs:
-        data.append({
-            'id': a.id,
-            'student': f"{a.student.firstName} {a.student.lastName}",
-            'studentId': a.student.id,
-            'studentEmail': a.student.user.email,
-            'studentDepartment': a.student.department.name if a.student.department else '',
-            'company': a.offer.company.companyName,
-            'offer': a.offer.title,
-            'score': a.matchingScore,
-        })
-    return Response(data)

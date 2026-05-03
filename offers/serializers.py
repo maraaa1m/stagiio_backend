@@ -7,30 +7,21 @@ class SkillSerializer(serializers.ModelSerializer):
         fields = ['id', 'skillName']
 
 class InternshipOfferSerializer(serializers.ModelSerializer):
-    """
-    LOGIC: The Hybrid Operational Serializer.
-    Orchestrates the conversion of flat UI forms into complex relational models.
-    """
     requiredSkills = SkillSerializer(many=True, read_only=True)
+    company_name = serializers.CharField(source='company.companyName', read_only=True)
     remainingSpots = serializers.IntegerField(read_only=True)
-    
-    # Logic: Accepts IDs for writing, provides objects for reading.
     skillIds = serializers.ListField(child=serializers.IntegerField(), write_only=True, required=False)
 
     class Meta:
         model = InternshipOffer
         fields = [
-            'id', 'title', 'description', 'willaya', 'type',
+            'id', 'title', 'description', 'willaya', 'type', 'company_name',
             'maxParticipants', 'remainingSpots', 'is_active',
             'applicationDeadline', 'internshipStartDate', 'internshipEndDate',
             'requiredSkills', 'skillIds',
         ]
 
     def validate(self, data):
-        """
-        BUSINESS RULE: Chronological Integrity.
-        Ensures the recruitment phase ends before the work phase begins.
-        """
         if data.get('applicationDeadline') and data.get('internshipStartDate'):
             if data['applicationDeadline'] >= data['internshipStartDate']:
                 raise serializers.ValidationError("Deadline must be before the internship start date.")
@@ -51,5 +42,5 @@ class InternshipOfferSerializer(serializers.ModelSerializer):
         for attr, value in validated_data.items(): setattr(instance, attr, value)
         instance.save()
         if skill_ids is not None:
-            instance.requiredSkills.set(skill_ids) # Atomic Sync
+            instance.requiredSkills.set(skill_ids)
         return instance
